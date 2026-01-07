@@ -1,0 +1,24 @@
+name: Build PS2 ELF
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: ps2dev/ps2dev:latest
+    steps:
+      -锐 uses: actions/checkout@v3
+
+      - name: Install dependencies
+        run: |
+          apk add build-base git
+
+      - name: Compile
+        run: |
+          make
+          
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: NeutrinoLauncher
+          path: NeutrinoLauncher.elf
