@@ -1,7 +1,6 @@
 EE_BIN = NeutrinoLauncher.elf
 EE_OBJS = main.o
-# Rimuoviamo -lfileXio. Aggiungiamo -lpatches per gestire i driver.
-EE_LIBS = -ldebug -lpatches
+EE_LIBS = -ldebug -lpatches -lfileXio
 
 all: $(EE_BIN)
 
