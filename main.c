@@ -2,31 +2,46 @@
 #include <tamtypes.h>
 #include <loadfile.h>
 #include <kernel.h>
+#include <fileXio_rpc.h>
 
-void launch_neutrino(char *device, char *game_id) {
-    // Percorso dell'eseguibile Neutrino (deve essere sulla tua USB/HDD)
-    char *elf_path = "mass:/APPS/neutrino.elf"; 
+// Funzione per caricare i moduli necessari (IRX)
+void load_basic_modules() {
+    SifInitRpc(0);
+    fxeInit(); // Inizializza fileXio per accesso a HDD/USB
+}
+
+void launch_game(const char* path, const char* mode) {
+    char *elf_path = "mass:/neutrino.elf"; // Assumi che Neutrino sia qui
     
-    // Costruiamo gli argomenti (Esempio per USB)
-    // Neutrino accetta: -bs (blocksize/driver), -d (device), ecc.
-    char *args[] = {
-        elf_path,
-        "-bs=mass",        // Cambia in 'ata' per HDD, 'sd' per MX4SIO
-        "-mod=dvd", 
-        game_id,           // Es: "SLES_555.01"
-        NULL
-    };
+    // Costruzione dinamica degli argomenti in base al dispositivo
+    char *args[10];
+    args[0] = elf_path;
+    
+    if (strcmp(mode, "usb") == 0) {
+        args[1] = "-bs=mass";
+    } else if (strcmp(mode, "mx4sio") == 0) {
+        args[1] = "-bs=sd";
+    } else if (strcmp(mode, "hdd") == 0) {
+        args[1] = "-bs=ata";
+    }
 
-    printf("Lancio di Neutrino per il gioco: %s su %s\n", game_id, device);
+    args[2] = "-mod=dvd";
+    args[3] = (char*)path; // Percorso della ISO
+    args[4] = NULL;
+
+    printf("Avvio in corso su %s...\n", mode);
     execv(elf_path, args);
 }
 
 int main() {
-    printf("--- Neutrino GUI Launcher v0.1 ---\n");
+    load_basic_modules();
     
-    // Qui in futuro metteremo la logica per leggere i tasti del controller
-    // Per ora simuliamo il lancio di un gioco su USB
-    launch_neutrino("usb", "SLES_123.45");
+    printf("Neutrino Multi-Launcher Ready.\n");
+    printf("1. USB (mass)\n2. MX4SIO (sd)\n3. HDD (ata)\n");
+
+    // Per ora lanciamo un test predefinito
+    // In futuro qui leggeremo l'input del controller PS2
+    launch_game("mass:/DVD/GIOCO.ISO", "usb");
 
     return 0;
 }
