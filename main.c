@@ -2,114 +2,72 @@
 #include <kernel.h>
 #include <sifrpc.h>
 #include <loadfile.h>
-#include <stdio.h>
-#include <debug.h>
-#include <unistd.h>
-#include <string.h>
-#include <dirent.h>
+#include <gsKit.h>
+#include <dmaKit.h>
 #include <libpad.h>
+#include <dirent.h>
+#include <string.h>
+#include "ds34usb.h"
 
-// Buffer per il pad (allineato a 64 byte per il DMA)
-static char padBuf[256] __attribute__((aligned(64)));
-char iso_list[20][256]; 
-int iso_count = 0;
+// Dati del driver incorporati (dal Makefile)
+extern unsigned char ds34usb_irx[];
+extern unsigned int size_ds34usb_irx;
 
-void load_modules(void) {
+GSGLOBAL *gsGlobal;
+GSTEXTURE TexCover;
+char iso_list[30][128];
+int iso_count = 0, selected = 0;
+
+void load_all_modules() {
+    SifInitRpc(0);
     SifLoadModule("rom0:SIO2MAN", 0, NULL);
     SifLoadModule("rom0:PADMAN", 0, NULL);
-}
-
-void wait_pad_ready(int port, int slot) {
-    int state;
-    // Correzione: Usiamo PAD_STATE_STABLE invece di PAD_STATE_READY
-    while((state = padGetState(port, slot)) != PAD_STATE_STABLE) {
-        if(state == PAD_STATE_DISCONN) scr_printf("Pad non connesso...\n");
-    }
-}
-
-void scan_iso() {
-    DIR *d = opendir("mass:/DVD/");
-    struct dirent *dir;
-    iso_count = 0;
-    if (d) {
-        while ((dir = readdir(d)) != NULL && iso_count < 20) {
-            if (strstr(dir->d_name, ".ISO") || strstr(dir->d_name, ".iso")) {
-                strncpy(iso_list[iso_count], dir->d_name, 256);
-                iso_count++;
-            }
-        }
-        closedir(d);
-    }
-}
-
-void start_neutrino(const char *iso_name) {
-    char *neutrino_path = "mass:/neutrino.elf";
-    char full_iso_path[512];
-    sprintf(full_iso_path, "mass:/DVD/%s", iso_name);
-
-    char *args[5];
-    args[0] = neutrino_path;
-    args[1] = "-bs=mass"; 
-    args[2] = "-mod=dvd";
-    args[3] = full_iso_path;
-    args[4] = NULL;
-
-    scr_printf("\nAvvio di Neutrino in corso...\n");
-    execv(neutrino_path, args);
+    // Carica il driver PS3/PS4 dalla memoria interna
+    SifExecModuleBuffer(ds34usb_irx, size_ds34usb_irx, 0, NULL, NULL);
+    ds34usb_init();
 }
 
 int main() {
-    SifInitRpc(0);
-    load_modules();
-    init_scr();
-
-    scr_printf("==========================================\n");
-    scr_printf("      NEUTRINO LAUNCHER - DraxTube        \n");
-    scr_printf("   GitHub: github.com/DraxTube            \n");
-    scr_printf("   YouTube: youtube.com/@DraxTube01       \n");
-    scr_printf("==========================================\n\n");
-
-    padInit(0);
-    padPortOpen(0, 0, padBuf);
-    wait_pad_ready(0, 0);
-
-    scr_printf("Scansione mass:/DVD/ in corso...\n");
-    scan_iso();
-
-    if (iso_count == 0) {
-        scr_printf("ERRORE: Nessuna ISO trovata in mass:/DVD/\n");
-        while(1);
+    load_all_modules();
+    
+    // Inizializzazione Grafica GSKit
+    gsGlobal = gsKit_init_global();
+    dmaKit_init_all();
+    gsKit_init_screen(gsGlobal);
+    
+    // Scansione ISO
+    DIR *d = opendir("mass:/DVD/");
+    struct dirent *dir;
+    while (d && (dir = readdir(d)) != NULL && iso_count < 30) {
+        if (strstr(dir->d_name, ".ISO") || strstr(dir->d_name, ".iso")) {
+            strncpy(iso_list[iso_count++], dir->d_name, 128);
+        }
     }
-
-    int selected = 0;
-    struct padButtonStatus buttons;
-    u32 paddata, old_pad = 0, new_pad;
+    if(d) closedir(d);
 
     while(1) {
-        scr_clear();
-        scr_printf("Sviluppato da DraxTube - Seleziona un gioco:\n");
-        scr_printf("------------------------------------------\n");
-        for(int i=0; i<iso_count; i++) {
-            scr_printf("%s %s\n", (i == selected) ? " >" : "  ", iso_list[i]);
-        }
-        scr_printf("\n[SU/GIU] Naviga  [X] Avvia gioco");
+        gsKit_clear(gsGlobal, GS_SETREG_RGBAQ(0x00, 0x00, 0x20, 0x80, 0x00));
+        
+        // UI Testuale (Puoi migliorarla con i font)
+        printf("DraxTube Launcher - Seleziona Gioco\n");
 
-        if(padRead(0, 0, &buttons) != 0) {
-            paddata = 0xffff ^ buttons.btns;
-            new_pad = paddata & ~old_pad;
-            old_pad = paddata;
-
-            if(new_pad & PAD_DOWN) selected = (selected + 1) % iso_count;
-            if(new_pad & PAD_UP)   selected = (selected - 1 + iso_count) % iso_count;
-            if(new_pad & PAD_CROSS) break;
+        // Lettura Input (Supporto DualShock 3/4 USB)
+        u8 ds_data[18];
+        if (ds34usb_get_status(0) & DS34USB_STATE_RUNNING) {
+            ds34usb_get_data(0, ds_data);
+            // Esempio: Croce su DS4 (bitmask semplificata)
+            if (ds_data[5] & 0x40) break; 
         }
-        usleep(30000); 
+
+        gsKit_queue_exec(gsGlobal);
+        gsKit_sync_flip(gsGlobal);
     }
 
-    start_neutrino(iso_list[selected]);
-
-    scr_printf("\nERRORE: Impossibile avviare mass:/neutrino.elf\n");
-    while(1);
+    // Lancio Neutrino
+    char full_path[256];
+    sprintf(full_path, "mass:/DVD/%s", iso_list[selected]);
+    char *args[] = {"mass:/neutrino.elf", "-bs=mass", "-mod=dvd", full_path, NULL};
+    execv(args[0], args);
 
     return 0;
 }
