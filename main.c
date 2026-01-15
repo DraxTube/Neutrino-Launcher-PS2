@@ -3,64 +3,114 @@
 #include <sifrpc.h>
 #include <loadfile.h>
 #include <stdio.h>
-#include <debug.h>   // Libreria per scrivere testo semplice a schermo
+#include <debug.h>
 #include <unistd.h>
 #include <string.h>
+#include <dirent.h>
+#include <libpad.h>
 
-// Funzione per lanciare Neutrino
-void start_neutrino(char *mode) {
-    char *neutrino_path = "mass:/neutrino.elf"; // Assicurati che sia qui!
+// Buffer per il pad (allineato a 64 byte per il DMA)
+static char padBuf[256] __attribute__((aligned(64)));
+char iso_list[20][256]; 
+int iso_count = 0;
+
+void load_modules(void) {
+    SifLoadModule("rom0:SIO2MAN", 0, NULL);
+    SifLoadModule("rom0:PADMAN", 0, NULL);
+}
+
+void wait_pad_ready(int port, int slot) {
+    int state;
+    while((state = padGetState(port, slot)) != PAD_STATE_READY) {
+        if(state == PAD_STATE_DISCONN) scr_printf("Pad non connesso...\n");
+    }
+}
+
+void scan_iso() {
+    DIR *d = opendir("mass:/DVD/");
+    struct dirent *dir;
+    iso_count = 0;
+    if (d) {
+        while ((dir = readdir(d)) != NULL && iso_count < 20) {
+            if (strstr(dir->d_name, ".ISO") || strstr(dir->d_name, ".iso")) {
+                strncpy(iso_list[iso_count], dir->d_name, 256);
+                iso_count++;
+            }
+        }
+        closedir(d);
+    }
+}
+
+void start_neutrino(const char *iso_name) {
+    char *neutrino_path = "mass:/neutrino.elf";
+    char full_iso_path[512];
+    sprintf(full_iso_path, "mass:/DVD/%s", iso_name);
+
     char *args[5];
-
-    scr_printf("\n\nPreparazione avvio in modalita': %s\n", mode);
-    
-    // Argomenti per Neutrino
     args[0] = neutrino_path;
-    if(strcmp(mode, "USB") == 0)      args[1] = "-bs=mass";
-    else if(strcmp(mode, "HDD") == 0) args[1] = "-bs=ata";
-    else if(strcmp(mode, "MX4") == 0) args[1] = "-bs=sd";
-    else if(strcmp(mode, "UDP") == 0) args[1] = "-bs=nbd";
-    
+    args[1] = "-bs=mass"; // Modalità USB
     args[2] = "-mod=dvd";
-    // ATTENZIONE: Per questo test semplificato, lanciamo un gioco fisso o chiediamo dopo
-    // Modifica questo nome con il nome ESATTO della tua ISO di prova
-    args[3] = "mass:/DVD/TEST.ISO"; 
+    args[3] = full_iso_path;
     args[4] = NULL;
 
-    scr_printf("Esecuzione di: %s\n", neutrino_path);
-    scr_printf("ISO: %s\n", args[3]);
-    
-    // Lancia
+    scr_printf("\nAvvio di Neutrino in corso...\n");
     execv(neutrino_path, args);
 }
 
 int main() {
     SifInitRpc(0);
-    init_scr(); // Inizializza lo schermo di testo (schermo nero, scritte bianche)
+    load_modules();
+    init_scr();
 
-    scr_printf("=================================\n");
-    scr_printf("   NEUTRINO SIMPLE LAUNCHER v1   \n");
-    scr_printf("=================================\n\n");
+    scr_printf("==========================================\n");
+    scr_printf("      NEUTRINO LAUNCHER - DraxTube        \n");
+    scr_printf("   GitHub: github.com/DraxTube            \n");
+    scr_printf("   YouTube: youtube.com/@DraxTube01       \n");
+    scr_printf("==========================================\n\n");
 
-    scr_printf("Questo launcher richiede che Neutrino sia in mass:/neutrino.elf\n");
-    scr_printf("E che il gioco sia mass:/DVD/TEST.ISO (per ora)\n\n");
+    padInit(0);
+    padPortOpen(0, 0, padBuf);
+    wait_pad_ready(0, 0);
 
-    scr_printf("Seleziona modalita' (simulazione):\n");
-    scr_printf("Attendi 5 secondi per avvio USB automatico...\n");
+    scr_printf("Scansione mass:/DVD/ in corso...\n");
+    scan_iso();
 
-    // Simuliamo un'attesa (perché non abbiamo caricato i driver del pad per semplificare)
-    int countdown = 5;
-    while(countdown > 0) {
-        scr_printf("Avvio USB tra %d...\n", countdown);
-        sleep(1); // Aspetta 1 secondo
-        countdown--;
+    if (iso_count == 0) {
+        scr_printf("ERRORE: Nessuna ISO trovata in mass:/DVD/\n");
+        scr_printf("Assicurati che la cartella DVD esista sulla USB.\n");
+        while(1);
     }
 
-    start_neutrino("USB");
+    int selected = 0;
+    struct padButtonStatus buttons;
+    u32 paddata, old_pad = 0, new_pad;
 
-    // Se fallisce:
-    scr_printf("\nERRORE: Neutrino non trovato o errore di esecuzione.\n");
-    while(1) {} // Blocca qui
+    while(1) {
+        scr_clear();
+        scr_printf("Sviluppato da DraxTube - Seleziona un gioco:\n");
+        scr_printf("------------------------------------------\n");
+        for(int i=0; i<iso_count; i++) {
+            scr_printf("%s %s\n", (i == selected) ? " >" : "  ", iso_list[i]);
+        }
+        scr_printf("\n[SU/GIU] Naviga  [X] Avvia gioco");
+
+        if(padRead(0, 0, &buttons) != 0) {
+            paddata = 0xffff ^ buttons.btns;
+            new_pad = paddata & ~old_pad;
+            old_pad = paddata;
+
+            if(new_pad & PAD_DOWN) selected = (selected + 1) % iso_count;
+            if(new_pad & PAD_UP)   selected = (selected - 1 + iso_count) % iso_count;
+            if(new_pad & PAD_CROSS) break;
+        }
+        usleep(30000); // Riduce il flickering dello schermo
+    }
+
+    start_neutrino(iso_list[selected]);
+
+    // Se execv fallisce
+    scr_printf("\nERRORE: Impossibile avviare mass:/neutrino.elf\n");
+    while(1);
 
     return 0;
 }
