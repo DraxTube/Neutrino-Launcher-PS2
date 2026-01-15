@@ -21,7 +21,8 @@ void load_modules(void) {
 
 void wait_pad_ready(int port, int slot) {
     int state;
-    while((state = padGetState(port, slot)) != PAD_STATE_READY) {
+    // Correzione: Usiamo PAD_STATE_STABLE invece di PAD_STATE_READY
+    while((state = padGetState(port, slot)) != PAD_STATE_STABLE) {
         if(state == PAD_STATE_DISCONN) scr_printf("Pad non connesso...\n");
     }
 }
@@ -48,7 +49,7 @@ void start_neutrino(const char *iso_name) {
 
     char *args[5];
     args[0] = neutrino_path;
-    args[1] = "-bs=mass"; // Modalità USB
+    args[1] = "-bs=mass"; 
     args[2] = "-mod=dvd";
     args[3] = full_iso_path;
     args[4] = NULL;
@@ -77,7 +78,6 @@ int main() {
 
     if (iso_count == 0) {
         scr_printf("ERRORE: Nessuna ISO trovata in mass:/DVD/\n");
-        scr_printf("Assicurati che la cartella DVD esista sulla USB.\n");
         while(1);
     }
 
@@ -103,12 +103,11 @@ int main() {
             if(new_pad & PAD_UP)   selected = (selected - 1 + iso_count) % iso_count;
             if(new_pad & PAD_CROSS) break;
         }
-        usleep(30000); // Riduce il flickering dello schermo
+        usleep(30000); 
     }
 
     start_neutrino(iso_list[selected]);
 
-    // Se execv fallisce
     scr_printf("\nERRORE: Impossibile avviare mass:/neutrino.elf\n");
     while(1);
 
