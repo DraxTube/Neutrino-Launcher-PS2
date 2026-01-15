@@ -1,3 +1,4 @@
+#include "ds34usb.h"
 #include <kernel.h>
 #include <sifrpc.h>
 #include <string.h>
