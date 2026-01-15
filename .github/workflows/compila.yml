@@ -1,6 +1,11 @@
-name: Build PS2 ELF
+name: Build and Release PS2 ELF
 
-on: [push, pull_request]
+on: 
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
 
 jobs:
   build:
@@ -20,5 +25,15 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: NeutrinoLauncher
+          name: NeutrinoLauncher-DraxTube
           path: NeutrinoLauncher.elf
+
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: NeutrinoLauncher.elf
+          name: Release ${{ github.ref_name }}
+          body: "Compilazione automatica del Launcher Neutrino per DraxTube."
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
