@@ -50,47 +50,46 @@ void scan_games() {
 
 void launch_neutrino(char *isoName) {
     char iso_arg[256];
-    // Specifichiamo il percorso completo incluso il device per evitare ambiguità
     sprintf(iso_arg, "-dvd=mass:/DVD/%s", isoName); 
 
-    char *args[8];
+    char *args[10];
     args[0] = NEUTRINO_PATH;
     args[1] = "-bsd=mx4sio"; 
-    args[2] = "-bsdfs=exfat"; // FORZIAMO exFAT come visto nel tuo toml
+    args[2] = "-bsdfs=fatfs"; // Usiamo fatfs come indicato nei tuoi moduli
     args[3] = iso_arg;
-    args[4] = "-cwd=mass:/";  // Forza la cartella di lavoro sulla USB per trovare i moduli
+    args[4] = "-cwd=mass:/";  // Obbligatorio per trovare /modules/
     args[5] = "-qb";
-    args[6] = "-dbc";         // Attiva colori di debug: se vedi colori prima del crash, sappiamo dove fallisce
-    args[7] = NULL;
+    args[6] = "-dbc";         // Attiva colori di debug
+    args[7] = "-logo";        // Necessario per stabilità v1.7.0
+    args[8] = NULL;
 
     scr_clear();
-    scr_printf("LANCIO AVANZATO v2.4...\n");
-    
-    // Se la tua SD è FAT32, cambia args[2] in "-bsdfs=fatfs"
-    
+    scr_printf("AVVIO NEUTRINO v1.7.0...\n");
+    scr_printf("DRIVER: MX4SIO (SLOT 2)\n");
+    scr_printf("ISO: %s\n", isoName);
+
+    // Disabilita tutto prima di cedere il controllo a Neutrino
     padPortClose(0,0);
     SifExitRpc();
     FlushCache(0);
     FlushCache(2);
 
-    LoadExecPS2(NEUTRINO_PATH, 7, args);
+    LoadExecPS2(NEUTRINO_PATH, 8, args);
 }
 
 int main() {
     init_system();
     struct padButtonStatus buttons;
-    u32 old_pad = 0;
-    u32 new_pad = 0;
-
+    u32 old_pad = 0, new_pad = 0;
     scan_games();
 
     while(1) {
         if (force_redraw) {
             scr_clear();
             scr_setfontcolor(0x00FFFF);
-            scr_printf("NEUTRINO LAUNCHER v2.4 - DEBUG MODE\n");
-            scr_printf("======================================\n\n");
-            if (gameCount == 0) scr_printf("ISO NON TROVATE!\n");
+            scr_printf("NEUTRINO LAUNCHER v2.5\n");
+            scr_printf("==============================\n\n");
+            if (gameCount == 0) scr_printf("ISO NON TROVATE SU MX4SIO!\n");
             else {
                 for(int i = 0; i < gameCount; i++) {
                     if (i == selectedIndex) { scr_setfontcolor(0x00FF00); scr_printf(" > %s\n", gameList[i]); }
@@ -103,7 +102,7 @@ int main() {
             new_pad = 0xffff ^ buttons.btns;
             if ((new_pad & PAD_DOWN) && !(old_pad & PAD_DOWN)) { if (selectedIndex < gameCount - 1) { selectedIndex++; force_redraw = 1; } }
             if ((new_pad & PAD_UP) && !(old_pad & PAD_UP)) { if (selectedIndex > 0) { selectedIndex--; force_redraw = 1; } }
-            if ((new_pad & PAD_CROSS) && !(old_pad & PAD_CROSS)) { if (gameCount > 0) launch_neutrino(gameList[selectedIndex]); }
+            if ((new_pad & PAD_CROSS) && !(old_pad & PAD_CROSS)) launch_neutrino(gameList[selectedIndex]);
             old_pad = new_pad;
         }
     }
