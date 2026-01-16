@@ -1,176 +1,177 @@
-#include <stdio.h>
-#include <string.h>      // <--- AGGIUNTO: Risolve l'errore di 'strstr'
-#include <unistd.h>      // Per sleep()
-#include <debug.h>
+#include <tamtypes.h>
+#include <kernel.h>
 #include <sifrpc.h>
 #include <loadfile.h>
-#include <libpad.h>
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
 #include <dirent.h>
+#include <debug.h>
+#include <libpad.h>
+#include <sbv_patches.h>
 
-// Struttura per memorizzare i dati dei giochi
-typedef struct {
-    char nome[128];
-} Gioco;
+// --- CONFIGURAZIONE ---
+#define MAX_GAMES 100
+#define PATH_MAX 256
 
-Gioco listaGiochi[100]; // Supporto fino a 100 giochi
-int totaleGiochi = 0;
-int selezione = 0;
+// Strutture per lo stato
+char gameList[MAX_GAMES][64];
+int gameCount = 0;
+int selectedIndex = 0;
+int currentDevice = 0; // 0=USB, 1=MX4SIO, 2=HDD, 3=UDPBD
 
-// Variabili per le Opzioni (Mode 1, 2, 3)
-int mode1 = 0, mode2 = 0, mode3 = 0;
+// Buffer Controller
+static char padBuf[256] __attribute__((aligned(64)));
 
-// Pulisce lo schermo (metodo semplice per l'interfaccia testuale)
-void pulisci_schermo() {
-    init_scr(); 
+// Mappa dispositivi e parametri Neutrino
+const char* deviceNames[] = { "USB (Mass Storage)", "MX4SIO (SD Card)", "HDD (Internal)", "UDPBD (Ethernet)" };
+const char* devicePrefix[] = { "mass:", "mass:", "hdd0:", "mass:" }; // Neutrino accede spesso via mass anche per SD in certi loader, ma qui definiamo il path di scansione
+const char* neutrinoArg[]  = { "-bs=mass", "-bs=sd", "-bs=ata", "-bs=nbd" };
+
+// --- FUNZIONI SISTEMA ---
+void init_system() {
+    SifInitRpc(0);
+    init_scr(); // Schermo testuale
+    scr_clear();
+    
+    // Patch vitali per lanciare altri ELF
+    sbv_patch_enable_lmb();
+    sbv_patch_disable_prefix_check();
+
+    // Inizializza PAD
+    padInit(0);
+    padPortOpen(0, 0, padBuf);
 }
 
-void mostra_menu_principale() {
-    pulisci_schermo();
+// Scansiona la cartella DVD del dispositivo selezionato
+void scan_games() {
+    gameCount = 0;
+    selectedIndex = 0;
+    char path[PATH_MAX];
     
-    // Header stile NHDDL
-    scr_printf("\n");
-    scr_printf("  DRAXTUBE LAUNCHER v1.0\n");
-    scr_printf("  ----------------------\n\n");
+    // Costruisci percorso scansione (Es. mass:/DVD/)
+    sprintf(path, "%s/DVD/", devicePrefix[currentDevice]);
+    
+    scr_printf("Scansione in corso su %s...\n", path);
 
-    if (totaleGiochi == 0) {
-        scr_printf("  Nessun gioco trovato in mass:/DVD/\n");
-        scr_printf("  Assicurati che la USB sia inserita.\n");
-    } else {
-        // Mostra la lista dei giochi
-        for (int i = 0; i < totaleGiochi; i++) {
-            if (i == selezione) {
-                // Evidenzia la selezione
-                scr_printf(" > %s <\n", listaGiochi[i].nome);
-            } else {
-                scr_printf("   %s\n", listaGiochi[i].nome);
+    DIR *dir = opendir(path);
+    if (dir != NULL) {
+        struct dirent *ent;
+        while ((ent = readdir(dir)) != NULL && gameCount < MAX_GAMES) {
+            // Filtra solo .ISO
+            if (strstr(ent->d_name, ".ISO") || strstr(ent->d_name, ".iso")) {
+                strncpy(gameList[gameCount], ent->d_name, 63);
+                gameCount++;
             }
         }
-
-        // Footer con Info e Comandi
-        scr_printf("\n  ----------------------\n");
-        // Simulazione percorso copertina (come OPL)
-        scr_printf("  ART: mass:/ART/%s.jpg\n", listaGiochi[selezione].nome);
-        scr_printf("  ----------------------\n");
-        scr_printf("  X: Avvia | /\\: Opzioni\n");
+        closedir(dir);
+    } else {
+        // Se fallisce, proviamo senza slash iniziale o cartella root
+        sprintf(gameList[0], "Nessun gioco trovato / Errore Dir");
+        gameCount = 0; 
     }
 }
 
-void mostra_menu_opzioni() {
-    pulisci_schermo();
-    scr_printf("\n");
-    scr_printf("  OPZIONI DI AVVIO\n");
-    scr_printf("  ----------------\n\n");
-    scr_printf("  [1] Accurate Read: %s\n", mode1 ? "ON" : "OFF");
-    scr_printf("  [2] Sync Read:     %s\n", mode2 ? "ON" : "OFF");
-    scr_printf("  [3] Uncached Read: %s\n", mode3 ? "ON" : "OFF");
-    scr_printf("\n  ----------------\n");
-    scr_printf("  O: Torna Indietro | [ ]: Cambia Mode\n");
-}
-
-void scansiona_cartella_dvd() {
-    DIR *d;
-    struct dirent *dir;
+// Lancia Neutrino con i parametri corretti
+void launch_neutrino(char *isoName) {
+    char elf_path[] = "mass:/neutrino.elf"; // Neutrino deve essere SEMPRE qui (o su MC)
+    char iso_full_path[PATH_MAX];
     
-    // Prova ad aprire la cartella DVD sulla chiavetta USB
-    d = opendir("mass:/DVD");
-    totaleGiochi = 0;
+    // Costruisci percorso completo ISO
+    sprintf(iso_full_path, "%s/DVD/%s", devicePrefix[currentDevice], isoName);
 
-    if (d) {
-        while ((dir = readdir(d)) != NULL) {
-            // Cerca solo i file che contengono .iso o .ISO
-            if (strstr(dir->d_name, ".iso") || strstr(dir->d_name, ".ISO")) {
-                // Copia il nome nella lista
-                snprintf(listaGiochi[totaleGiochi].nome, 128, "%s", dir->d_name);
-                totaleGiochi++;
-                if (totaleGiochi >= 100) break; // Limite massimo raggiunto
-            }
-        }
-        closedir(d);
-    } else {
-        scr_printf("Errore: Cartella mass:/DVD non trovata.\n");
-    }
+    // Preparazione Argomenti
+    char *args[6];
+    args[0] = elf_path;               // Arg0: Path ELF
+    args[1] = (char*)neutrinoArg[currentDevice]; // Arg1: Driver (-bs=mass, etc)
+    args[2] = "-mod=dvd";             // Arg2: Modalità
+    args[3] = iso_full_path;          // Arg3: Path ISO
+    args[4] = NULL;
+
+    scr_clear();
+    scr_printf("LANCIO IN CORSO...\n");
+    scr_printf("Neutrino: %s\n", elf_path);
+    scr_printf("Driver: %s\n", args[1]);
+    scr_printf("ISO: %s\n", iso_full_path);
+    
+    execv(elf_path, args);
+    
+    // Se arriva qui, ha fallito
+    scr_printf("\nERRORE: Impossibile avviare neutrino.elf\nControlla che sia nella root USB.");
+    sleep(5);
 }
 
 int main() {
-    // 1. Inizializzazione Sistema
-    SifInitRpc(0);
-    init_scr();
-
-    scr_printf("Caricamento Driver...\n");
+    init_system();
     
-    // Caricamento moduli essenziali
-    SifLoadModule("rom0:SIO2MAN", 0, NULL);
-    SifLoadModule("rom0:PADMAN", 0, NULL);
-    SifLoadModule("rom0:USBD", 0, NULL);
-    SifLoadModule("rom0:USB_MASS", 0, NULL);
-
-    // 2. Inizializzazione Controller
-    static char padBuf[256] __attribute__((aligned(64)));
-    padInit(0);
-    padPortOpen(0, 0, padBuf);
-
-    // Attesa per il montaggio della USB
-    sleep(3); 
-
-    // 3. Scansione Giochi
-    scansiona_cartella_dvd();
-
     struct padButtonStatus buttons;
     u32 old_pad = 0;
-    int in_opzioni = 0;
+    u32 new_pad = 0;
 
-    // Loop Principale
+    // Scansione iniziale (Default USB)
+    scan_games();
+
     while(1) {
-        int ret = padRead(0, 0, &buttons);
+        scr_clear();
+        scr_set_fontcolor(0xFFFFFF); // Bianco
+        scr_printf("== NEUTRINO UNIVERSAL LAUNCHER ==\n\n");
         
-        if (ret != 0) {
-            u32 paddata = 0xffff ^ buttons.btns;
-            u32 new_pad = paddata & ~old_pad; // Rileva solo la nuova pressione (non tenere premuto)
-            old_pad = paddata;
+        // Info Dispositivo
+        scr_printf("Sorgente: [ %s ] (Premi L1/R1 per cambiare)\n", deviceNames[currentDevice]);
+        scr_printf("----------------------------------------\n");
 
-            if (!in_opzioni) {
-                // --- MENU PRINCIPALE ---
-                if ((new_pad & PAD_DOWN) && selezione < totaleGiochi - 1) { 
-                    selezione++; 
-                    mostra_menu_principale(); 
-                }
-                if ((new_pad & PAD_UP) && selezione > 0) { 
-                    selezione--; 
-                    mostra_menu_principale(); 
-                }
-                if (new_pad & PAD_TRIANGLE) { 
-                    in_opzioni = 1; 
-                    mostra_menu_opzioni(); 
-                }
-                if (new_pad & PAD_CROSS) { 
-                    scr_printf("\nAvvio di %s in corso...\n", listaGiochi[selezione].nome);
-                    // Qui andrà il codice per lanciare Neutrino
-                    sleep(2);
-                }
-            } else {
-                // --- MENU OPZIONI ---
-                if (new_pad & PAD_CIRCLE) { 
-                    in_opzioni = 0; 
-                    mostra_menu_principale(); 
-                }
-                // Il tasto Quadrato attiva/disattiva le mode in sequenza per test
-                if (new_pad & PAD_SQUARE) {
-                    if (!mode1) mode1 = 1;
-                    else if (!mode2) mode2 = 1;
-                    else if (!mode3) mode3 = 1;
-                    else { mode1=0; mode2=0; mode3=0; }
-                    mostra_menu_opzioni();
+        if (gameCount == 0) {
+            scr_printf("   < NESSUN GIOCO TROVATO >\n");
+            scr_printf("   Assicurati che i giochi siano in /DVD/\n");
+        } else {
+            for(int i=0; i<gameCount; i++) {
+                if (i == selectedIndex) {
+                    scr_set_fontcolor(0x00FF00); // Verde per selezione
+                    scr_printf(" > %s\n", gameList[i]);
+                } else {
+                    scr_set_fontcolor(0xAAAAAA); // Grigio
+                    scr_printf("   %s\n", gameList[i]);
                 }
             }
         }
-        
-        // Ridisegna solo ogni tanto per evitare flickering eccessivo
-        if (totaleGiochi > 0) {
-             // Nota: In un'app reale si ridisegna solo se cambia qualcosa, 
-             // ma qui lo lasciamo semplice.
+
+        // --- INPUT HANDLING ---
+        if (padRead(0, 0, &buttons) != 0) {
+            new_pad = 0xffff ^ buttons.btns;
+
+            // Navigazione SU/GIU
+            if ((new_pad & PAD_DOWN) && !(old_pad & PAD_DOWN)) {
+                if(gameCount > 0) selectedIndex = (selectedIndex + 1) % gameCount;
+            }
+            if ((new_pad & PAD_UP) && !(old_pad & PAD_UP)) {
+                if(gameCount > 0) selectedIndex = (selectedIndex - 1 + gameCount) % gameCount;
+            }
+
+            // Cambio Device (L1 / R1)
+            if ((new_pad & PAD_R1) && !(old_pad & PAD_R1)) {
+                currentDevice = (currentDevice + 1) % 4;
+                scan_games();
+            }
+            if ((new_pad & PAD_L1) && !(old_pad & PAD_L1)) {
+                currentDevice = (currentDevice - 1 + 4) % 4;
+                scan_games();
+            }
+
+            // Avvio (X)
+            if ((new_pad & PAD_CROSS) && !(old_pad & PAD_CROSS)) {
+                if (gameCount > 0) launch_neutrino(gameList[selectedIndex]);
+            }
+
+            // Refresh (Triangolo)
+            if ((new_pad & PAD_TRIANGLE) && !(old_pad & PAD_TRIANGLE)) {
+                scan_games();
+            }
+
+            old_pad = new_pad;
         }
-        
-        usleep(50000); // 50ms di pausa per non sovraccaricare la CPU
+
+        // Delay anti-flicker
+        for(int i=0; i<300000; i++) asm("nop"); 
     }
 
     return 0;
