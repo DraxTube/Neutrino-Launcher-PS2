@@ -50,25 +50,24 @@ void scan_games() {
 
 void launch_neutrino(char *isoName) {
     char iso_arg[256];
+    // Per Neutrino v1.7.0, usiamo il prefisso mass: perché lui monta la SD come disco principale
     sprintf(iso_arg, "-dvd=mass:/DVD/%s", isoName); 
 
     char *args[10];
     args[0] = NEUTRINO_PATH;
     args[1] = "-bsd=mx4sio"; 
-    args[2] = "-bsdfs=fatfs"; // Usiamo fatfs come indicato nei tuoi moduli
+    args[2] = "-bsdfs=exfat"; // Diciamo a Neutrino di attivare il profilo exFAT del driver
     args[3] = iso_arg;
-    args[4] = "-cwd=mass:/";  // Obbligatorio per trovare /modules/
+    args[4] = "-cwd=mass:/";  // Fondamentale per fargli trovare la cartella /modules/
     args[5] = "-qb";
-    args[6] = "-dbc";         // Attiva colori di debug
-    args[7] = "-logo";        // Necessario per stabilità v1.7.0
+    args[6] = "-dbc";         // Attiva i colori di debug
+    args[7] = "-logo";
     args[8] = NULL;
 
     scr_clear();
-    scr_printf("AVVIO NEUTRINO v1.7.0...\n");
-    scr_printf("DRIVER: MX4SIO (SLOT 2)\n");
-    scr_printf("ISO: %s\n", isoName);
-
-    // Disabilita tutto prima di cedere il controllo a Neutrino
+    scr_printf("LANCIO NEUTRINO v1.7.0...\n");
+    scr_printf("SD: exFAT | ISO: %s\n", isoName);
+    
     padPortClose(0,0);
     SifExitRpc();
     FlushCache(0);
@@ -87,9 +86,9 @@ int main() {
         if (force_redraw) {
             scr_clear();
             scr_setfontcolor(0x00FFFF);
-            scr_printf("NEUTRINO LAUNCHER v2.5\n");
-            scr_printf("==============================\n\n");
-            if (gameCount == 0) scr_printf("ISO NON TROVATE SU MX4SIO!\n");
+            scr_printf("NEUTRINO LAUNCHER v2.7 (SINGLE-DRIVER FIX)\n");
+            scr_printf("==========================================\n\n");
+            if (gameCount == 0) scr_printf("ISO NON TROVATE! CONTROLLA SLOT 2.\n");
             else {
                 for(int i = 0; i < gameCount; i++) {
                     if (i == selectedIndex) { scr_setfontcolor(0x00FF00); scr_printf(" > %s\n", gameList[i]); }
