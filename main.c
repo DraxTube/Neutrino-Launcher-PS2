@@ -2,64 +2,118 @@
 #include <debug.h>
 #include <sifrpc.h>
 #include <loadfile.h>
-#include <fileXio_rpc.h> // Per leggere i file dalla USB
 #include <libpad.h>
-#include <dirent.h>      // Per gestire le cartelle
+#include <dirent.h>      // Standard POSIX per le cartelle
+#include <unistd.h>      // Per sleep()
+
+// Struttura per gestire i giochi
+typedef struct {
+    char nome[128];
+    char percorso[256];
+} Gioco;
+
+Gioco listaGiochi[50];
+int totaleGiochi = 0;
+int selezione = 0;
+
+// Variabili per le Opzioni (tipo Mode di OPL)
+int mode1 = 0, mode2 = 0, mode3 = 0;
+
+void pulisci_schermo() {
+    init_scr(); // Resetta lo schermo del debugger
+}
+
+void mostra_interfaccia() {
+    pulisci_schermo();
+    scr_printf("==========================================\n");
+    scr_printf("      DRAXTUBE LAUNCHER - PROGETTO        \n");
+    scr_printf("==========================================\n\n");
+
+    if (totaleGiochi == 0) {
+        scr_printf("Nessun gioco trovato in mass:/DVD/\n");
+    } else {
+        for (int i = 0; i < totaleGiochi; i++) {
+            if (i == selezione)
+                scr_printf("> [%s] <\n", listaGiochi[i].nome);
+            else
+                scr_printf("  %s  \n", listaGiochi[i].nome);
+        }
+        
+        scr_printf("\n------------------------------------------\n");
+        scr_printf("INFO: mass:/ART/%s.jpg (Copertina)\n", listaGiochi[selezione].nome);
+        scr_printf("------------------------------------------\n");
+        scr_printf("X: Avvia | TRIANGOLO: Opzioni | START: Esci\n");
+    }
+}
+
+void menu_opzioni() {
+    pulisci_schermo();
+    scr_printf("=== OPZIONI COMPATIBILITA' (MODES) ===\n\n");
+    scr_printf(" [1] Mode 1 (Accurate Read): %s\n", mode1 ? "ON" : "OFF");
+    scr_printf(" [2] Mode 2 (Sync Read):     %s\n", mode2 ? "ON" : "OFF");
+    scr_printf(" [3] Mode 3 (Uncached):      %s\n", mode3 ? "ON" : "OFF");
+    scr_printf("\nPremi CERCHIO per tornare indietro...\n");
+}
 
 void scansiona_giochi() {
-    scr_printf("Scansione cartella mass:/DVD/...\n");
-    
-    int fd = fileXioDopen("mass:/DVD");
-    if (fd < 0) {
-        scr_printf("ERRORE: Cartella DVD non trovata su USB!\n");
-        return;
-    }
+    DIR *d;
+    struct dirent *dir;
+    d = opendir("mass:/DVD");
+    totaleGiochi = 0;
 
-    iox_dirent_t record;
-    int count = 0;
-    while (fileXioDread(fd, &record) > 0) {
-        // Mostriamo solo i file (non le cartelle)
-        if (record.stat.mode & FIO_S_IFREG) {
-            scr_printf(" [%d] Gioco trovato: %s\n", count + 1, record.name);
-            count++;
+    if (d) {
+        while ((dir = readdir(d)) != NULL) {
+            if (strstr(dir->d_name, ".iso") || strstr(dir->d_name, ".ISO")) {
+                snprintf(listaGiochi[totaleGiochi].nome, 128, "%s", dir->d_name);
+                totaleGiochi++;
+            }
         }
+        closedir(d);
     }
-    fileXioDclose(fd);
-
-    if (count == 0) scr_printf("Nessun file ISO trovato.\n");
 }
 
 int main() {
     SifInitRpc(0);
     init_scr();
 
-    // --- CREDITI DraxTube ---
-    scr_printf("==========================================\n");
-    scr_printf("      DRAXTUBE LAUNCHER (NHDDL Style)     \n");
-    scr_printf("   YouTube: @DraxTube01                   \n");
-    scr_printf("==========================================\n\n");
-
-    // Caricamento driver necessari
-    scr_printf("Avvio USB e FileSystem...\n");
+    // Caricamento silenzioso dei driver
     SifLoadModule("rom0:SIO2MAN", 0, NULL);
-    SifLoadModule("rom0:USBD", 0, NULL);     // Driver USB
-    SifLoadModule("rom0:USB_MASS", 0, NULL); // Driver Mass Storage
-    SifLoadModule("rom0:FILEXIO", 0, NULL);  // Driver per gestione file
-    
-    fileXioInit(); // Inizializza la libreria fileXio
+    SifLoadModule("rom0:PADMAN", 0, NULL);
+    SifLoadModule("rom0:USBD", 0, NULL);
+    SifLoadModule("rom0:USB_MASS", 0, NULL);
 
-    // Aspettiamo un secondo che la USB venga letta
-    scr_printf("In attesa della chiavetta USB...\n");
-    delay(2); 
+    static char padBuf[256] __attribute__((aligned(64)));
+    padInit(0);
+    padPortOpen(0, 0, padBuf);
 
-    // Eseguiamo la scansione proprio come NHDDL
+    scr_printf("Inizializzazione DraxTube...\n");
+    sleep(2); // Sostituito delay() con sleep() per evitare errori
+
     scansiona_giochi();
 
-    scr_printf("\nPremi START per ricaricare la lista...\n");
+    struct padButtonStatus buttons;
+    int in_opzioni = 0;
 
-    // Loop infinito per ora
     while(1) {
-        // Qui aggiungeremo la selezione del gioco con le frecce
+        if (padRead(0, 0, &buttons) != 0) {
+            u32 paddata = 0xffff ^ buttons.btns;
+
+            if (!in_opzioni) {
+                if (paddata & PAD_DOWN && selezione < totaleGiochi - 1) { selezione++; mostra_interfaccia(); }
+                if (paddata & PAD_UP && selezione > 0) { selezione--; mostra_interfaccia(); }
+                if (paddata & PAD_TRIANGLE) { in_opzioni = 1; menu_opzioni(); }
+                if (paddata & PAD_CROSS) { 
+                    scr_printf("\nAvvio di %s con Neutrino...\n", listaGiochi[selezione].nome);
+                    // Qui chiameremo il boot di Neutrino
+                }
+            } else {
+                if (paddata & PAD_CIRCLE) { in_opzioni = 0; mostra_interfaccia(); }
+                // Cambia le mode
+                if (paddata & PAD_SQUARE) { mode1 = !mode1; menu_opzioni(); }
+            }
+        }
+        mostra_interfaccia();
+        usleep(150000); // Piccola pausa per non far scorrere la lista troppo veloce
     }
 
     return 0;
