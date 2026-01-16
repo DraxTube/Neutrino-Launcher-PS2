@@ -14,7 +14,7 @@
 char gameList[MAX_GAMES][64];
 int gameCount = 0;
 int selectedIndex = 0;
-int force_redraw = 1; // Gestisce lo sfarfallio
+int force_redraw = 1; 
 
 static char padBuf[256] __attribute__((aligned(64)));
 
@@ -47,26 +47,42 @@ void launch_neutrino(char *isoName) {
     char iso_path[256];
     sprintf(iso_path, "mass:/DVD/%s", isoName);
 
-    // Argomenti per Neutrino
+    // Prepariamo gli argomenti (usiamo mass:/ perché i giochi li vede lì)
     char *args[] = {
         "mass:/neutrino.elf",
-        "-bs=mass",   // Cambia in -bs=sd se usi SOLO MX4SIO
+        "-bs=mass", 
         "-mod=dvd",
         iso_path,
         NULL
     };
 
     scr_clear();
-    scr_printf("Lancio in corso...\n");
-    scr_printf("ISO: %s\n", iso_path);
+    scr_printf("INIZIALIZZAZIONE LANCIO...\n");
+    scr_printf("Gioco: %s\n", isoName);
 
-    // Esecuzione
+    // TENTATIVI DI LANCIO A TAPPETO
+    // 1. Percorso standard minuscolo
     execv("mass:/neutrino.elf", args);
-
-    // Se fallisce, riprova con prefisso mass0
+    
+    // 2. Percorso standard MAIUSCOLO (spesso risolve su PS2)
+    args[0] = "mass:/NEUTRINO.ELF";
+    execv("mass:/NEUTRINO.ELF", args);
+    
+    // 3. Variante mass0: (usata da alcuni driver)
+    args[0] = "mass0:/neutrino.elf";
     execv("mass0:/neutrino.elf", args);
+    
+    // 4. Variante mass0: MAIUSCOLO
+    args[0] = "mass0:/NEUTRINO.ELF";
+    execv("mass0:/NEUTRINO.ELF", args);
 
-    scr_printf("ERRORE: neutrino.elf non trovato in mass:/\n");
+    // Se arriviamo qui, nessuno dei tentativi ha funzionato
+    scr_setfontcolor(0x0000FF); // Rosso
+    scr_printf("\nERRORE FATALE: neutrino.elf non trovato.\n");
+    scr_printf("Verifica che il file sia nella ROOT della USB\n");
+    scr_printf("e che si chiami esattamente neutrino.elf\n");
+    scr_printf("\nPremi un tasto per tornare al menu...");
+    
     sleep(5);
     force_redraw = 1;
 }
@@ -80,22 +96,23 @@ int main() {
     scan_games();
 
     while(1) {
-        // SOLUZIONE SFARFALLIO: Ridisegna solo se cambia qualcosa
         if (force_redraw) {
             scr_clear();
             scr_setfontcolor(0x00FFFF);
-            scr_printf("NEUTRINO LAUNCHER - FISSO\n");
-            scr_printf("==========================\n\n");
+            scr_printf("NEUTRINO LAUNCHER v1.5 - FIX LANCIO\n");
+            scr_printf("====================================\n\n");
             
             if (gameCount == 0) {
-                scr_printf("Nessun gioco trovato in mass:/DVD/\n");
+                scr_printf("ERRORE: Cartella mass:/DVD/ vuota o non trovata!\n");
             } else {
+                scr_setfontcolor(0xFFFFFF);
+                scr_printf("Seleziona Gioco (X per avviare):\n\n");
                 for(int i = 0; i < gameCount; i++) {
                     if (i == selectedIndex) {
-                        scr_setfontcolor(0x00FF00); // Verde
+                        scr_setfontcolor(0x00FF00);
                         scr_printf(" > %s\n", gameList[i]);
                     } else {
-                        scr_setfontcolor(0xAAAAAA); // Grigio
+                        scr_setfontcolor(0xAAAAAA);
                         scr_printf("   %s\n", gameList[i]);
                     }
                 }
@@ -105,18 +122,11 @@ int main() {
 
         if (padRead(0, 0, &buttons) != 0) {
             new_pad = 0xffff ^ buttons.btns;
-
             if ((new_pad & PAD_DOWN) && !(old_pad & PAD_DOWN)) {
-                if (selectedIndex < gameCount - 1) {
-                    selectedIndex++;
-                    force_redraw = 1;
-                }
+                if (selectedIndex < gameCount - 1) { selectedIndex++; force_redraw = 1; }
             }
             if ((new_pad & PAD_UP) && !(old_pad & PAD_UP)) {
-                if (selectedIndex > 0) {
-                    selectedIndex--;
-                    force_redraw = 1;
-                }
+                if (selectedIndex > 0) { selectedIndex--; force_redraw = 1; }
             }
             if ((new_pad & PAD_CROSS) && !(old_pad & PAD_CROSS)) {
                 if (gameCount > 0) launch_neutrino(gameList[selectedIndex]);
