@@ -1,16 +1,21 @@
 EE_BIN = NeutrinoLauncher.elf
-EE_OBJS = main.o ds34usb.o ds34usb_driver_bin.o
-EE_LIBS = -lgskit -ldmakit -ljpeg -lpng -lz -lpad -ldebug -lpatches -lfileXio
+EE_OBJS = main.o ds34usb_client.o iop/ds34usb.irx.o
+EE_LIBS = -ldebug -lpatches -lfileXio
 
-all: $(EE_BIN)
+# Regola per trasformare il driver IRX in un oggetto caricabile nel launcher
+iop/ds34usb.irx.o: iop/ds34usb.irx
+	bin2s iop/ds34usb.irx iop/ds34usb.irx.s ds34usb_irx
+	$(EE_AS) iop/ds34usb.irx.s -o iop/ds34usb.irx.o
 
-# Prende il file ds34usb.irx e lo trasforma in codice C
-ds34usb_driver_bin.o: ds34usb.irx
-	bin2s ds34usb.irx ds34usb_driver_bin.s ds34usb_irx
-	mips64r5900el-ps2-elf-gcc -c ds34usb_driver_bin.s -o ds34usb_driver_bin.o
+# Compilazione del driver IOP (richiede Makefile specifico in iop/)
+iop/ds34usb.irx:
+	$(MAKE) -C iop/
+
+all: iop/ds34usb.irx.o $(EE_BIN)
 
 clean:
-	rm -f $(EE_BIN) $(EE_OBJS) ds34usb_driver_bin.s
+	rm -f $(EE_BIN) $(EE_OBJS) iop/ds34usb.irx.o
+	$(MAKE) -C iop/ clean
 
 include $(PS2SDK)/samples/Makefile.pref
 include $(PS2SDK)/samples/Makefile.eeglobal
