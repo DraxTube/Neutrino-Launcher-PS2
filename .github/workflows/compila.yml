@@ -1,4 +1,4 @@
-name: DraxTube Build System
+name: DraxTube Build
 
 on: [push]
 
@@ -9,17 +9,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Build Launcher
         run: |
-          apk add build-base git
-          # Installa le librerie grafiche mancanti
-          ps2sdk-ports-install gskit libjpeg-turbo libpng zlib
-
-      - name: Compile
-        run: make
+          # Non usiamo ps2sdk-ports-install per ora
+          make
           
-      - name: Upload
+      - name: Save ELF
         uses: actions/upload-artifact@v4
         with:
-          name: DraxTubeLauncher
+          name: NeutrinoLauncher-DraxTube
           path: NeutrinoLauncher.elf
