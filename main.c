@@ -14,15 +14,17 @@
 char gameList[MAX_GAMES][64];
 int gameCount = 0;
 int selectedIndex = 0;
-int force_redraw = 1; 
+int force_redraw = 1;
 
 static char padBuf[256] __attribute__((aligned(64)));
 
 void init_system() {
     SifInitRpc(0);
-    init_scr(); 
+    init_scr();
+    // Patch fondamentali per caricare ELF da USB/SD
     sbv_patch_enable_lmb();
     sbv_patch_disable_prefix_check();
+    
     padInit(0);
     padPortOpen(0, 0, padBuf);
 }
@@ -40,51 +42,52 @@ void scan_games() {
         }
         closedir(dir);
     }
-    force_redraw = 1; 
+    force_redraw = 1;
 }
 
 void launch_neutrino(char *isoName) {
-    char iso_path[256];
-    sprintf(iso_path, "mass:/DVD/%s", isoName);
+    char iso_full_path[256];
+    sprintf(iso_full_path, "mass:/DVD/%s", isoName);
 
-    // Prepariamo gli argomenti (usiamo mass:/ perché i giochi li vede lì)
-    char *args[] = {
-        "mass:/neutrino.elf",
-        "-bs=mass", 
-        "-mod=dvd",
-        iso_path,
-        NULL
-    };
+    // Proviamo a vedere se il file esiste prima di lanciarlo
+    FILE *f = fopen("mass:/neutrino.elf", "rb");
+    if (f == NULL) {
+        scr_clear();
+        scr_setfontcolor(0x0000FF);
+        scr_printf("ERRORE CRITICO:\n");
+        scr_printf("Il file 'mass:/neutrino.elf' non e' leggibile.\n");
+        scr_printf("1. Controlla che sia nella ROOT della USB (non in cartelle).\n");
+        scr_printf("2. Rinominalo tutto in minuscolo: neutrino.elf\n");
+        scr_printf("\nPremi un tasto per tornare indietro...");
+        sleep(5);
+        force_redraw = 1;
+        return;
+    }
+    fclose(f);
+
+    // Preparazione argomenti per LoadExecPS2
+    struct __args {
+        int argc;
+        char *argv[5];
+    } launch_args;
+
+    launch_args.argc = 4;
+    launch_args.argv[0] = "mass:/neutrino.elf";
+    launch_args.argv[1] = "-bs=sd"; // Visto che usi MX4SIO, questo è il comando giusto
+    launch_args.argv[2] = "-mod=dvd";
+    launch_args.argv[3] = iso_full_path;
+    launch_args.argv[4] = NULL;
 
     scr_clear();
-    scr_printf("INIZIALIZZAZIONE LANCIO...\n");
-    scr_printf("Gioco: %s\n", isoName);
+    scr_printf("LANCIO IN CORSO VIA LOADEXEC...\n");
+    scr_printf("Eseguo: %s\n", launch_args.argv[0]);
+    
+    // De-inizializza tutto prima del lancio per evitare crash
+    padPortClose(0,0);
+    SifExitRpc();
 
-    // TENTATIVI DI LANCIO A TAPPETO
-    // 1. Percorso standard minuscolo
-    execv("mass:/neutrino.elf", args);
-    
-    // 2. Percorso standard MAIUSCOLO (spesso risolve su PS2)
-    args[0] = "mass:/NEUTRINO.ELF";
-    execv("mass:/NEUTRINO.ELF", args);
-    
-    // 3. Variante mass0: (usata da alcuni driver)
-    args[0] = "mass0:/neutrino.elf";
-    execv("mass0:/neutrino.elf", args);
-    
-    // 4. Variante mass0: MAIUSCOLO
-    args[0] = "mass0:/NEUTRINO.ELF";
-    execv("mass0:/NEUTRINO.ELF", args);
-
-    // Se arriviamo qui, nessuno dei tentativi ha funzionato
-    scr_setfontcolor(0x0000FF); // Rosso
-    scr_printf("\nERRORE FATALE: neutrino.elf non trovato.\n");
-    scr_printf("Verifica che il file sia nella ROOT della USB\n");
-    scr_printf("e che si chiami esattamente neutrino.elf\n");
-    scr_printf("\nPremi un tasto per tornare al menu...");
-    
-    sleep(5);
-    force_redraw = 1;
+    // Il metodo definitivo per lanciare ELF su PS2
+    LoadExecPS2(launch_args.argv[0], launch_args.argc, launch_args.argv);
 }
 
 int main() {
@@ -99,14 +102,13 @@ int main() {
         if (force_redraw) {
             scr_clear();
             scr_setfontcolor(0x00FFFF);
-            scr_printf("NEUTRINO LAUNCHER v1.5 - FIX LANCIO\n");
-            scr_printf("====================================\n\n");
+            scr_printf("NEUTRINO LAUNCHER v1.6 - CRT OK\n");
+            scr_printf("==============================\n\n");
             
             if (gameCount == 0) {
-                scr_printf("ERRORE: Cartella mass:/DVD/ vuota o non trovata!\n");
+                scr_printf("Nessun gioco in mass:/DVD/ - Controlla la SD!\n");
             } else {
                 scr_setfontcolor(0xFFFFFF);
-                scr_printf("Seleziona Gioco (X per avviare):\n\n");
                 for(int i = 0; i < gameCount; i++) {
                     if (i == selectedIndex) {
                         scr_setfontcolor(0x00FF00);
@@ -133,6 +135,7 @@ int main() {
             }
             old_pad = new_pad;
         }
+        for(int i=0; i<50000; i++) asm("nop");
     }
     return 0;
 }
