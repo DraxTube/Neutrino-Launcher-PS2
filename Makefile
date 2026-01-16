@@ -1,6 +1,8 @@
 EE_BIN = NeutrinoLauncher.elf
 EE_OBJS = main.o
-EE_LIBS = -ldebug -lpad -lpatches
+
+# Librerie essenziali: Debug (schermo), Patches (avvio ELF), Pad (controller)
+EE_LIBS = -ldebug -lpatches -lpad
 
 all: $(EE_BIN)
 
