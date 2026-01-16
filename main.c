@@ -4,7 +4,7 @@
 #include <loadfile.h>
 #include <stdio.h>
 #include <string.h>
-#include <stdlib.h>  // AGGIUNTO: Risolve l'errore malloc
+#include <stdlib.h>
 #include <unistd.h>
 #include <dirent.h>
 #include <debug.h>
@@ -17,9 +17,9 @@ int gameCount = 0;
 int selectedIndex = 0;
 int force_redraw = 1;
 
-// Configurazione per il tuo setup
+// Configurazione basata sui tuoi TOML e sulla tua struttura
 #define NEUTRINO_PATH "mass:/neutrino.elf"
-#define GAMES_PREFIX  "mass1:/DVD/" // MX4SIO solitamente mappato su mass1
+#define GAMES_PREFIX  "mass1:/DVD/" // MX4SIO visto come mass1 dal launcher
 
 static char padBuf[256] __attribute__((aligned(64)));
 
@@ -35,7 +35,7 @@ void init_system() {
 void scan_games() {
     gameCount = 0;
     DIR *dir = opendir(GAMES_PREFIX);
-    if (dir == NULL) dir = opendir("mass0:/DVD/");
+    if (dir == NULL) dir = opendir("mass0:/DVD/"); // Fallback se mass1 fallisce
     
     if (dir != NULL) {
         struct dirent *ent;
@@ -51,28 +51,32 @@ void scan_games() {
 }
 
 void launch_neutrino(char *isoName) {
-    char iso_full_arg[256];
-    // Neutrino v1.5+ richiede -bsd=mx4sio per MX4SIO
-    // Il formato per l'ISO è -dvd=mass:/DVD/nome.iso
-    sprintf(iso_full_arg, "-dvd=mass:/DVD/%s", isoName); 
+    char iso_arg[256];
+    
+    // Per Neutrino, una volta caricato il driver mx4sio, 
+    // il dispositivo diventa 'mass:' (il bdm primario).
+    // Usiamo il formato esatto del README: -dvd=mass:path
+    sprintf(iso_arg, "-dvd=mass:/DVD/%s", isoName); 
 
     char *args[6];
     args[0] = NEUTRINO_PATH;
-    args[1] = "-bsd=mx4sio"; // Specificato nel README per MX4SIO
-    args[2] = iso_full_arg;
-    args[3] = "-qb";         // Quick boot (opzionale)
+    args[1] = "-bsd=mx4sio"; // Confermato dal tuo bsd-mx4sio.toml
+    args[2] = iso_arg;
+    args[3] = "-qb";         // Quick boot per evitare timeout grafici
     args[4] = NULL;
 
     scr_clear();
-    scr_printf("AVVIO NEUTRINO...\n");
-    scr_printf("ISO: %s\n", isoName);
+    scr_printf("LANCIO IN CORSO...\n");
+    scr_printf("Utilizzo driver: %s\n", args[1]);
+    scr_printf("ISO target: %s\n", isoName);
 
-    // De-inizializzazione IOP/Sif per stabilità
+    // PULIZIA TOTALE: Neutrino v1.5+ deve avere l'IOP libero
+    padPortClose(0,0);
     SifExitRpc();
     FlushCache(0);
     FlushCache(2);
 
-    // Esecuzione definitiva
+    // Carica Neutrino dalla USB (mass:) e passa il comando per la SD
     LoadExecPS2(NEUTRINO_PATH, 4, args);
 }
 
@@ -88,11 +92,11 @@ int main() {
         if (force_redraw) {
             scr_clear();
             scr_setfontcolor(0x00FFFF);
-            scr_printf("NEUTRINO LAUNCHER v2.1\n");
+            scr_printf("NEUTRINO LAUNCHER v2.3 - TOML READY\n");
             scr_printf("======================================\n\n");
             
             if (gameCount == 0) {
-                scr_printf("ERRORE: Nessun gioco in %s\n", GAMES_PREFIX);
+                scr_printf("ERRORE: Nessuna ISO trovata in %s\n", GAMES_PREFIX);
             } else {
                 scr_setfontcolor(0xFFFFFF);
                 for(int i = 0; i < gameCount; i++) {
