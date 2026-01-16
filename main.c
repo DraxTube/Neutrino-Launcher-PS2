@@ -16,7 +16,8 @@
 char gameList[MAX_GAMES][64];
 int gameCount = 0;
 int selectedIndex = 0;
-int currentDevice = 1; // 0=USB, 1=MX4SIO
+int currentDevice = 1; // Default MX4SIO
+int force_redraw = 1;  // Variabile per eliminare lo sfarfallio
 
 static char padBuf[256] __attribute__((aligned(64)));
 
@@ -27,11 +28,8 @@ const char* neutrinoArg[]  = { "-bs=mass", "-bs=sd", "-bs=ata", "-bs=nbd" };
 void init_system() {
     SifInitRpc(0);
     init_scr(); 
-    
-    // Patch necessarie per il passaggio tra ELF
     sbv_patch_enable_lmb();
     sbv_patch_disable_prefix_check();
-
     padInit(0);
     padPortOpen(0, 0, padBuf);
 }
@@ -53,18 +51,15 @@ void scan_games() {
         }
         closedir(dir);
     }
+    force_redraw = 1; // Ridisegna dopo la scansione
 }
 
 void launch_neutrino(char *isoName) {
     char iso_full_path[PATH_MAX];
     sprintf(iso_full_path, "%s/DVD/%s", devicePrefix[currentDevice], isoName);
 
-    // Proviamo i due percorsi più probabili per Neutrino
-    char *neutrino_paths[] = {
-        "mass:/neutrino.elf",
-        "mass0:/neutrino.elf",
-        "mc0:/neutrino.elf"
-    };
+    // Lista percorsi dove Neutrino potrebbe essere nascosto
+    char *paths[] = { "mass:/neutrino.elf", "mass0:/neutrino.elf", "host:/neutrino.elf", "mc0:/neutrino.elf" };
 
     char *args[6];
     args[1] = (char*)neutrinoArg[currentDevice]; 
@@ -73,22 +68,19 @@ void launch_neutrino(char *isoName) {
     args[4] = NULL;
 
     scr_clear();
-    scr_printf("AVVIO IN CORSO...\n------------------\n");
-    scr_printf("Driver: %s\n", args[1]);
-    scr_printf("ISO: %s\n", isoName);
-
-    for(int i = 0; i < 3; i++) {
-        scr_printf("Tentativo su: %s\n", neutrino_paths[i]);
-        args[0] = neutrino_paths[i];
-        execv(neutrino_paths[i], args);
+    scr_printf("TENTATIVO DI LANCIO...\n");
+    
+    for(int i=0; i<4; i++) {
+        scr_printf("Provo: %s\n", paths[i]);
+        args[0] = paths[i];
+        execv(paths[i], args);
     }
     
-    // Se arriviamo qui, ha fallito tutti i tentativi
-    scr_setfontcolor(0x0000FF); // Rosso
+    scr_setfontcolor(0x0000FF);
     scr_printf("\nERRORE: neutrino.elf non trovato!\n");
-    scr_printf("Assicurati che sia nella root (fuori dalle cartelle)\n");
-    scr_printf("e che si chiami esattamente neutrino.elf\n");
+    scr_printf("Mettilo nella root della USB/SD come 'neutrino.elf'\n");
     sleep(5);
+    force_redraw = 1;
 }
 
 int main() {
@@ -100,40 +92,48 @@ int main() {
     scan_games();
 
     while(1) {
-        // Sincronizzazione con il refresh della TV (FONDAMENTALE per CRT)
-        scr_vblank(); 
-        
-        scr_clear();
-        scr_setfontcolor(0x00FFFF); // Giallo
-        scr_printf("NEUTRINO MULTI-LAUNCHER v1.2\n");
-        scr_printf("============================\n\n");
-        
-        scr_setfontcolor(0xFFFFFF); // Bianco
-        scr_printf("SORGENTE: %s\n", deviceNames[currentDevice]);
-        scr_printf("(L1/R1 cambia - X seleziona)\n\n");
+        // DISEGNA SOLO SE NECESSARIO (Elimina lo sfarfallio al 100%)
+        if (force_redraw) {
+            scr_clear();
+            scr_setfontcolor(0x00FFFF);
+            scr_printf("NEUTRINO LAUNCHER v1.3 - STABILE\n");
+            scr_printf("================================\n\n");
+            
+            scr_setfontcolor(0xFFFFFF);
+            scr_printf("SORGENTE: %s\n", deviceNames[currentDevice]);
+            scr_printf("GIOCHI TROVATI: %d\n\n", gameCount);
 
-        if (gameCount == 0) {
-            scr_printf("   NESSUN GIOCO TROVATO IN %s/DVD/\n", devicePrefix[currentDevice]);
-        } else {
-            for(int i = 0; i < gameCount; i++) {
-                if (i == selectedIndex) {
-                    scr_setfontcolor(0x00FF00); // Verde
-                    scr_printf(" -> %s\n", gameList[i]);
-                } else {
-                    scr_setfontcolor(0xAAAAAA); // Grigio
-                    scr_printf("    %s\n", gameList[i]);
+            if (gameCount == 0) {
+                scr_printf("   NESSUN GIOCO IN %s/DVD/\n", devicePrefix[currentDevice]);
+            } else {
+                for(int i = 0; i < gameCount; i++) {
+                    if (i == selectedIndex) {
+                        scr_setfontcolor(0x00FF00); // Verde per il selezionato
+                        scr_printf(" -> %s\n", gameList[i]);
+                    } else {
+                        scr_setfontcolor(0xAAAAAA); // Grigio per gli altri
+                        scr_printf("    %s\n", gameList[i]);
+                    }
                 }
             }
+            force_redraw = 0; // Reset flag
         }
 
+        // GESTIONE INPUT
         if (padRead(0, 0, &buttons) != 0) {
             new_pad = 0xffff ^ buttons.btns;
 
             if ((new_pad & PAD_DOWN) && !(old_pad & PAD_DOWN)) {
-                if(gameCount > 0) selectedIndex = (selectedIndex + 1) % gameCount;
+                if(gameCount > 0) {
+                    selectedIndex = (selectedIndex + 1) % gameCount;
+                    force_redraw = 1;
+                }
             }
             if ((new_pad & PAD_UP) && !(old_pad & PAD_UP)) {
-                if(gameCount > 0) selectedIndex = (selectedIndex - 1 + gameCount) % gameCount;
+                if(gameCount > 0) {
+                    selectedIndex = (selectedIndex - 1 + gameCount) % gameCount;
+                    force_redraw = 1;
+                }
             }
             if ((new_pad & PAD_R1) && !(old_pad & PAD_R1)) {
                 currentDevice = (currentDevice + 1) % 4;
@@ -148,6 +148,9 @@ int main() {
             }
             old_pad = new_pad;
         }
+        
+        // Risparmio CPU
+        for(int i=0; i<100000; i++) asm("nop");
     }
     return 0;
 }
