@@ -2,10 +2,32 @@
 #include <debug.h>
 #include <sifrpc.h>
 #include <loadfile.h>
+#include <fileXio_rpc.h> // Per leggere i file dalla USB
 #include <libpad.h>
+#include <dirent.h>      // Per gestire le cartelle
 
-// Buffer per il controller standard PS2
-static char padBuf[256] __attribute__((aligned(64)));
+void scansiona_giochi() {
+    scr_printf("Scansione cartella mass:/DVD/...\n");
+    
+    int fd = fileXioDopen("mass:/DVD");
+    if (fd < 0) {
+        scr_printf("ERRORE: Cartella DVD non trovata su USB!\n");
+        return;
+    }
+
+    iox_dirent_t record;
+    int count = 0;
+    while (fileXioDread(fd, &record) > 0) {
+        // Mostriamo solo i file (non le cartelle)
+        if (record.stat.mode & FIO_S_IFREG) {
+            scr_printf(" [%d] Gioco trovato: %s\n", count + 1, record.name);
+            count++;
+        }
+    }
+    fileXioDclose(fd);
+
+    if (count == 0) scr_printf("Nessun file ISO trovato.\n");
+}
 
 int main() {
     SifInitRpc(0);
@@ -13,36 +35,32 @@ int main() {
 
     // --- CREDITI DraxTube ---
     scr_printf("==========================================\n");
-    scr_printf("      NEUTRINO LAUNCHER - DraxTube        \n");
+    scr_printf("      DRAXTUBE LAUNCHER (NHDDL Style)     \n");
     scr_printf("   YouTube: @DraxTube01                   \n");
-    scr_printf("   GitHub: https://github.com/DraxTube    \n");
     scr_printf("==========================================\n\n");
 
-    scr_printf("Caricamento moduli di sistema...\n");
+    // Caricamento driver necessari
+    scr_printf("Avvio USB e FileSystem...\n");
     SifLoadModule("rom0:SIO2MAN", 0, NULL);
-    SifLoadModule("rom0:PADMAN", 0, NULL);
+    SifLoadModule("rom0:USBD", 0, NULL);     // Driver USB
+    SifLoadModule("rom0:USB_MASS", 0, NULL); // Driver Mass Storage
+    SifLoadModule("rom0:FILEXIO", 0, NULL);  // Driver per gestione file
+    
+    fileXioInit(); // Inizializza la libreria fileXio
 
-    padInit(0);
-    padPortOpen(0, 0, padBuf);
+    // Aspettiamo un secondo che la USB venga letta
+    scr_printf("In attesa della chiavetta USB...\n");
+    delay(2); 
 
-    scr_printf("Sistema pronto. Usa un controller PS2 standard.\n");
-    scr_printf("Premi START per avviare Neutrino...\n");
+    // Eseguiamo la scansione proprio come NHDDL
+    scansiona_giochi();
 
-    struct padButtonStatus buttons;
+    scr_printf("\nPremi START per ricaricare la lista...\n");
+
+    // Loop infinito per ora
     while(1) {
-        int state = padGetState(0, 0);
-        if (state == PAD_STATE_STABLE || state == PAD_STATE_FINDCTP1) {
-            int ret = padRead(0, 0, &buttons);
-            if (ret != 0) {
-                u32 paddata = 0xffff ^ buttons.btns;
-                if (paddata & PAD_START) {
-                    scr_printf("START premuto! Avvio in corso...\n");
-                    break;
-                }
-            }
-        }
+        // Qui aggiungeremo la selezione del gioco con le frecce
     }
 
-    // Qui andrà il comando per lanciare Neutrino
     return 0;
 }
