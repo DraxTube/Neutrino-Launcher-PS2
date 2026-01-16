@@ -16,22 +16,19 @@
 char gameList[MAX_GAMES][64];
 int gameCount = 0;
 int selectedIndex = 0;
-int currentDevice = 1; // Default su 1 (MX4SIO) visto che usi quello
+int currentDevice = 1; // 0=USB, 1=MX4SIO
 
 static char padBuf[256] __attribute__((aligned(64)));
 
 const char* deviceNames[] = { "USB (Mass Storage)", "MX4SIO (SD Card)", "HDD (Internal)", "UDPBD (Ethernet)" };
-// Per MX4SIO e USB, il prefisso di lettura file in molti driver è "mass:" 
-// ma per Neutrino il driver del blocco cambia.
 const char* devicePrefix[] = { "mass:", "mass:", "hdd0:", "mass:" }; 
 const char* neutrinoArg[]  = { "-bs=mass", "-bs=sd", "-bs=ata", "-bs=nbd" };
 
 void init_system() {
     SifInitRpc(0);
     init_scr(); 
-    // Impostiamo un colore di sfondo fisso per ridurre il fastidio del refresh
-    scr_setfontcolor(0xFFFFFF);
     
+    // Patch necessarie per il passaggio tra ELF
     sbv_patch_enable_lmb();
     sbv_patch_disable_prefix_check();
 
@@ -59,13 +56,17 @@ void scan_games() {
 }
 
 void launch_neutrino(char *isoName) {
-    // Proviamo a cercare neutrino.elf sia nella root che in una cartella APPS
-    char elf_path[] = "mass:/neutrino.elf"; 
     char iso_full_path[PATH_MAX];
     sprintf(iso_full_path, "%s/DVD/%s", devicePrefix[currentDevice], isoName);
 
+    // Proviamo i due percorsi più probabili per Neutrino
+    char *neutrino_paths[] = {
+        "mass:/neutrino.elf",
+        "mass0:/neutrino.elf",
+        "mc0:/neutrino.elf"
+    };
+
     char *args[6];
-    args[0] = elf_path;               
     args[1] = (char*)neutrinoArg[currentDevice]; 
     args[2] = "-mod=dvd";             
     args[3] = iso_full_path;          
@@ -74,18 +75,19 @@ void launch_neutrino(char *isoName) {
     scr_clear();
     scr_printf("AVVIO IN CORSO...\n------------------\n");
     scr_printf("Driver: %s\n", args[1]);
-    scr_printf("Gioco: %s\n", isoName);
+    scr_printf("ISO: %s\n", isoName);
+
+    for(int i = 0; i < 3; i++) {
+        scr_printf("Tentativo su: %s\n", neutrino_paths[i]);
+        args[0] = neutrino_paths[i];
+        execv(neutrino_paths[i], args);
+    }
     
-    // Piccolo delay per permettere ai driver di stabilizzarsi
-    sleep(1);
-    
-    execv(elf_path, args);
-    
-    // Se execv fallisce, proviamo un percorso alternativo (es. se lanciato da uLaunchELF)
-    execv("host:/neutrino.elf", args); 
-    
+    // Se arriviamo qui, ha fallito tutti i tentativi
+    scr_setfontcolor(0x0000FF); // Rosso
     scr_printf("\nERRORE: neutrino.elf non trovato!\n");
-    scr_printf("Assicurati che sia nella root della USB o SD\ne che si chiami esattamente neutrino.elf\n");
+    scr_printf("Assicurati che sia nella root (fuori dalle cartelle)\n");
+    scr_printf("e che si chiami esattamente neutrino.elf\n");
     sleep(5);
 }
 
@@ -98,25 +100,24 @@ int main() {
     scan_games();
 
     while(1) {
-        // --- IL TRUCCO PER IL TUBO CATODICO (V-Sync) ---
-        // Aspettiamo che la TV abbia finito di disegnare il frame
-        scr_vblankWait(); 
+        // Sincronizzazione con il refresh della TV (FONDAMENTALE per CRT)
+        scr_vblank(); 
         
         scr_clear();
-        scr_setfontcolor(0xFFFF00); // Giallo per il titolo
-        scr_printf("NEUTRINO MULTI-LAUNCHER v1.1\n");
+        scr_setfontcolor(0x00FFFF); // Giallo
+        scr_printf("NEUTRINO MULTI-LAUNCHER v1.2\n");
         scr_printf("============================\n\n");
         
-        scr_setfontcolor(0xFFFFFF);
-        scr_printf("DISPOSITIVO: %s\n", deviceNames[currentDevice]);
+        scr_setfontcolor(0xFFFFFF); // Bianco
+        scr_printf("SORGENTE: %s\n", deviceNames[currentDevice]);
         scr_printf("(L1/R1 cambia - X seleziona)\n\n");
 
         if (gameCount == 0) {
-            scr_printf("   NESSUN GIOCO IN %s/DVD/\n", devicePrefix[currentDevice]);
+            scr_printf("   NESSUN GIOCO TROVATO IN %s/DVD/\n", devicePrefix[currentDevice]);
         } else {
-            for(int i=0; i<gameCount; i++) {
+            for(int i = 0; i < gameCount; i++) {
                 if (i == selectedIndex) {
-                    scr_setfontcolor(0x00FF00); // Verde selezione
+                    scr_setfontcolor(0x00FF00); // Verde
                     scr_printf(" -> %s\n", gameList[i]);
                 } else {
                     scr_setfontcolor(0xAAAAAA); // Grigio
