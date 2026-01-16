@@ -1,6 +1,6 @@
-name: DraxTube Build Simple
+name: Build Neutrino Launcher
 
-on: [push]
+on: [push, pull_request]
 
 jobs:
   build:
@@ -9,14 +9,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Tools
-        run: apk add --no-cache make build-base
+      - name: Install dependencies
+        run: apk add build-base git
 
       - name: Compile
         run: make
           
-      - name: Upload
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: DraxTube-Basic-Launcher
+          name: NeutrinoLauncher
           path: NeutrinoLauncher.elf
