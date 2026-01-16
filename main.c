@@ -4,6 +4,7 @@
 #include <loadfile.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>  // AGGIUNTO: Risolve l'errore malloc
 #include <unistd.h>
 #include <dirent.h>
 #include <debug.h>
@@ -16,9 +17,9 @@ int gameCount = 0;
 int selectedIndex = 0;
 int force_redraw = 1;
 
-// Configurazione basata sul tuo setup e README
+// Configurazione per il tuo setup
 #define NEUTRINO_PATH "mass:/neutrino.elf"
-#define GAMES_PREFIX  "mass1:/DVD/" // MX4SIO su mass1
+#define GAMES_PREFIX  "mass1:/DVD/" // MX4SIO solitamente mappato su mass1
 
 static char padBuf[256] __attribute__((aligned(64)));
 
@@ -34,7 +35,7 @@ void init_system() {
 void scan_games() {
     gameCount = 0;
     DIR *dir = opendir(GAMES_PREFIX);
-    if (dir == NULL) dir = opendir("mass0:/DVD/"); // Fallback
+    if (dir == NULL) dir = opendir("mass0:/DVD/");
     
     if (dir != NULL) {
         struct dirent *ent;
@@ -50,28 +51,28 @@ void scan_games() {
 }
 
 void launch_neutrino(char *isoName) {
-    char iso_full_path[256];
-    // Il README dice: neutrino.elf -bsd=mx4sio -dvd=mass:path/to/filename.iso
-    // Nota: Neutrino usa spesso 'mass:' internamente per riferirsi al bsd selezionato
-    sprintf(iso_full_path, "mass:/DVD/%s", isoName); 
+    char iso_full_arg[256];
+    // Neutrino v1.5+ richiede -bsd=mx4sio per MX4SIO
+    // Il formato per l'ISO è -dvd=mass:/DVD/nome.iso
+    sprintf(iso_full_arg, "-dvd=mass:/DVD/%s", isoName); 
 
     char *args[6];
     args[0] = NEUTRINO_PATH;
-    args[1] = "-bsd=mx4sio"; // Parametro corretto dal README
-    args[2] = (char*)malloc(256);
-    sprintf(args[2], "-dvd=%s", iso_full_path); // Formato corretto: -dvd=percorso
-    args[3] = "-qb"; // Quick boot per saltare il logo
+    args[1] = "-bsd=mx4sio"; // Specificato nel README per MX4SIO
+    args[2] = iso_full_arg;
+    args[3] = "-qb";         // Quick boot (opzionale)
     args[4] = NULL;
 
     scr_clear();
-    scr_printf("AVVIO NEUTRINO v1.5+...\n");
-    scr_printf("Driver: MX4SIO\n");
+    scr_printf("AVVIO NEUTRINO...\n");
     scr_printf("ISO: %s\n", isoName);
 
+    // De-inizializzazione IOP/Sif per stabilità
     SifExitRpc();
     FlushCache(0);
     FlushCache(2);
 
+    // Esecuzione definitiva
     LoadExecPS2(NEUTRINO_PATH, 4, args);
 }
 
@@ -87,11 +88,11 @@ int main() {
         if (force_redraw) {
             scr_clear();
             scr_setfontcolor(0x00FFFF);
-            scr_printf("NEUTRINO LAUNCHER v2.0 (MODULAR)\n");
+            scr_printf("NEUTRINO LAUNCHER v2.1\n");
             scr_printf("======================================\n\n");
             
             if (gameCount == 0) {
-                scr_printf("GIOCHI NON TROVATI IN %s\n", GAMES_PREFIX);
+                scr_printf("ERRORE: Nessun gioco in %s\n", GAMES_PREFIX);
             } else {
                 scr_setfontcolor(0xFFFFFF);
                 for(int i = 0; i < gameCount; i++) {
@@ -120,6 +121,7 @@ int main() {
             }
             old_pad = new_pad;
         }
+        for(int i=0; i<30000; i++) asm("nop");
     }
     return 0;
 }
