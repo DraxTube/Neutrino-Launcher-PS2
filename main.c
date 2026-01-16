@@ -12,10 +12,13 @@
 
 #define MAX_GAMES 100
 char gameList[MAX_GAMES][64];
-char activeDevice[10]; // Memorizza se è mass:, mass0:, mass1:, ecc.
 int gameCount = 0;
 int selectedIndex = 0;
 int force_redraw = 1;
+
+// DEFINIZIONI FISSE PER IL TUO SETUP
+#define NEUTRINO_PATH "mass:/neutrino.elf"  // Neutrino è sulla USB
+#define GAMES_PREFIX  "mass1:/DVD/"         // I giochi sono su MX4SIO (di solito mass1)
 
 static char padBuf[256] __attribute__((aligned(64)));
 
@@ -28,60 +31,58 @@ void init_system() {
     padPortOpen(0, 0, padBuf);
 }
 
-// Prova a scansionare mass:, mass0:, mass1: finché non trova la cartella DVD
 void scan_games() {
     gameCount = 0;
-    char *prefixes[] = {"mass:", "mass0:", "mass1:", "mass2:"};
-    
-    for (int i = 0; i < 4; i++) {
-        char path[32];
-        sprintf(path, "%s/DVD/", prefixes[i]);
-        DIR *dir = opendir(path);
-        if (dir != NULL) {
-            strcpy(activeDevice, prefixes[i]); // Abbiamo trovato il dispositivo giusto!
-            struct dirent *ent;
-            while ((ent = readdir(dir)) != NULL && gameCount < MAX_GAMES) {
-                if (strstr(ent->d_name, ".ISO") || strstr(ent->d_name, ".iso")) {
-                    strncpy(gameList[gameCount], ent->d_name, 63);
-                    gameCount++;
-                }
+    // Proviamo mass1: (MX4SIO) e se fallisce mass0:
+    DIR *dir = opendir(GAMES_PREFIX);
+    if (dir == NULL) {
+        dir = opendir("mass0:/DVD/");
+    }
+
+    if (dir != NULL) {
+        struct dirent *ent;
+        while ((ent = readdir(dir)) != NULL && gameCount < MAX_GAMES) {
+            if (strstr(ent->d_name, ".ISO") || strstr(ent->d_name, ".iso")) {
+                strncpy(gameList[gameCount], ent->d_name, 63);
+                gameCount++;
             }
-            closedir(dir);
-            if (gameCount > 0) break; // Esci se hai trovato giochi
         }
+        closedir(dir);
     }
     force_redraw = 1;
 }
 
 void launch_neutrino(char *isoName) {
-    char neutrino_path[64];
     char iso_full_path[256];
     
-    sprintf(neutrino_path, "%s/neutrino.elf", activeDevice);
-    sprintf(iso_full_path, "%s/DVD/%s", activeDevice, isoName);
+    // Costruiamo il percorso del gioco (su MX4SIO)
+    // Usiamo mass1: perché Neutrino riconoscerà MX4SIO così o tramite il driver interno
+    sprintf(iso_full_path, "mass1:/DVD/%s", isoName);
 
-    // Argomenti per Neutrino (Pre-Alpha potrebbe richiedere -bs=sd per MX4SIO)
-    char *args[5];
-    args[0] = neutrino_path;
-    args[1] = "-bs=sd"; // Cambialo in "-bs=mass" se usi una chiavetta USB normale
+    // Argomenti per Neutrino
+    char *args[6];
+    args[0] = NEUTRINO_PATH;
+    args[1] = "-bs=sd";      // IMPORTANTE: Dice a Neutrino di usare MX4SIO
     args[2] = "-mod=dvd";
     args[3] = iso_full_path;
     args[4] = NULL;
 
     scr_clear();
-    scr_printf("LANCIO DA: %s\n", activeDevice);
-    scr_printf("ELF: %s\n", neutrino_path);
+    scr_printf("LANCIO IN CORSO...\n");
+    scr_printf("ELF: %s (da USB)\n", NEUTRINO_PATH);
+    scr_printf("ISO: %s (da MX4SIO)\n", iso_full_path);
 
-    // Controllo esistenza file prima del boot
-    FILE *f = fopen(neutrino_path, "rb");
+    // Controllo se Neutrino esiste su USB prima di spegnere tutto
+    FILE *f = fopen(NEUTRINO_PATH, "rb");
     if (f) {
         fclose(f);
         SifExitRpc();
-        LoadExecPS2(neutrino_path, 4, args);
+        // LoadExecPS2 carica l'ELF da USB e gli passa il percorso del gioco su SD
+        LoadExecPS2(NEUTRINO_PATH, 4, args);
     } else {
         scr_setfontcolor(0x0000FF);
-        scr_printf("ERRORE: %s non trovato!\n", neutrino_path);
-        scr_printf("Rinomina il file in neutrino.elf (tutto minuscolo).\n");
+        scr_printf("\nERRORE: %s NON TROVATO SU USB!\n", NEUTRINO_PATH);
+        scr_printf("Metti neutrino.elf nella chiavetta USB.\n");
         sleep(5);
         force_redraw = 1;
     }
@@ -99,14 +100,15 @@ int main() {
         if (force_redraw) {
             scr_clear();
             scr_setfontcolor(0x00FFFF);
-            scr_printf("NEUTRINO LAUNCHER v1.7 - PORT: %s\n", activeDevice);
+            scr_printf("NEUTRINO LAUNCHER v1.8 - USB+MX4SIO\n");
             scr_printf("======================================\n\n");
             
             if (gameCount == 0) {
-                scr_printf("ERRORE: Nessun gioco trovato in mass0,1,2:/DVD/\n");
-                scr_printf("Premi SELECT per riprovare la scansione.\n");
+                scr_printf("GIOCHI NON TROVATI SU MX4SIO (mass1:/DVD/)\n");
+                scr_printf("Premi SELECT per riprovare.\n");
             } else {
                 scr_setfontcolor(0xFFFFFF);
+                scr_printf("Seleziona Gioco su SD:\n");
                 for(int i = 0; i < gameCount; i++) {
                     if (i == selectedIndex) {
                         scr_setfontcolor(0x00FF00);
