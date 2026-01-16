@@ -9,50 +9,42 @@
 #include <debug.h>
 #include <libpad.h>
 #include <sbv_patches.h>
-#include <limits.h> // Per PATH_MAX di sistema
+#include <limits.h>
 
-// --- CONFIGURAZIONE ---
 #define MAX_GAMES 100
 
-// Strutture per lo stato
 char gameList[MAX_GAMES][64];
 int gameCount = 0;
 int selectedIndex = 0;
-int currentDevice = 0; // 0=USB, 1=MX4SIO, 2=HDD, 3=UDPBD
+int currentDevice = 1; // Default su 1 (MX4SIO) visto che usi quello
 
-// Buffer Controller
 static char padBuf[256] __attribute__((aligned(64)));
 
-// Mappa dispositivi e parametri Neutrino
 const char* deviceNames[] = { "USB (Mass Storage)", "MX4SIO (SD Card)", "HDD (Internal)", "UDPBD (Ethernet)" };
+// Per MX4SIO e USB, il prefisso di lettura file in molti driver è "mass:" 
+// ma per Neutrino il driver del blocco cambia.
 const char* devicePrefix[] = { "mass:", "mass:", "hdd0:", "mass:" }; 
 const char* neutrinoArg[]  = { "-bs=mass", "-bs=sd", "-bs=ata", "-bs=nbd" };
 
-// --- FUNZIONI SISTEMA ---
 void init_system() {
     SifInitRpc(0);
-    init_scr(); // Schermo testuale
-    scr_clear();
+    init_scr(); 
+    // Impostiamo un colore di sfondo fisso per ridurre il fastidio del refresh
+    scr_setfontcolor(0xFFFFFF);
     
-    // Patch vitali per lanciare altri ELF
     sbv_patch_enable_lmb();
     sbv_patch_disable_prefix_check();
 
-    // Inizializza PAD
     padInit(0);
     padPortOpen(0, 0, padBuf);
 }
 
-// Scansiona la cartella DVD del dispositivo selezionato
 void scan_games() {
     gameCount = 0;
     selectedIndex = 0;
     char path[PATH_MAX];
-    
     sprintf(path, "%s/DVD/", devicePrefix[currentDevice]);
     
-    scr_printf("Scansione in corso su %s...\n", path);
-
     DIR *dir = opendir(path);
     if (dir != NULL) {
         struct dirent *ent;
@@ -63,15 +55,13 @@ void scan_games() {
             }
         }
         closedir(dir);
-    } else {
-        gameCount = 0; 
     }
 }
 
 void launch_neutrino(char *isoName) {
+    // Proviamo a cercare neutrino.elf sia nella root che in una cartella APPS
     char elf_path[] = "mass:/neutrino.elf"; 
     char iso_full_path[PATH_MAX];
-    
     sprintf(iso_full_path, "%s/DVD/%s", devicePrefix[currentDevice], isoName);
 
     char *args[6];
@@ -82,20 +72,25 @@ void launch_neutrino(char *isoName) {
     args[4] = NULL;
 
     scr_clear();
-    scr_printf("LANCIO IN CORSO...\n");
-    scr_printf("Neutrino: %s\n", elf_path);
+    scr_printf("AVVIO IN CORSO...\n------------------\n");
     scr_printf("Driver: %s\n", args[1]);
-    scr_printf("ISO: %s\n", iso_full_path);
+    scr_printf("Gioco: %s\n", isoName);
+    
+    // Piccolo delay per permettere ai driver di stabilizzarsi
+    sleep(1);
     
     execv(elf_path, args);
     
-    scr_printf("\nERRORE: Impossibile avviare neutrino.elf\nControlla la USB.");
+    // Se execv fallisce, proviamo un percorso alternativo (es. se lanciato da uLaunchELF)
+    execv("host:/neutrino.elf", args); 
+    
+    scr_printf("\nERRORE: neutrino.elf non trovato!\n");
+    scr_printf("Assicurati che sia nella root della USB o SD\ne che si chiami esattamente neutrino.elf\n");
     sleep(5);
 }
 
 int main() {
     init_system();
-    
     struct padButtonStatus buttons;
     u32 old_pad = 0;
     u32 new_pad = 0;
@@ -103,24 +98,29 @@ int main() {
     scan_games();
 
     while(1) {
-        scr_clear();
-        scr_setfontcolor(0xFFFFFF); // Bianco (Corretto senza _)
-        scr_printf("== NEUTRINO UNIVERSAL LAUNCHER ==\n\n");
+        // --- IL TRUCCO PER IL TUBO CATODICO (V-Sync) ---
+        // Aspettiamo che la TV abbia finito di disegnare il frame
+        scr_vblankWait(); 
         
-        scr_printf("Sorgente: [ %s ] (Premi L1/R1 per cambiare)\n", deviceNames[currentDevice]);
-        scr_printf("----------------------------------------\n");
+        scr_clear();
+        scr_setfontcolor(0xFFFF00); // Giallo per il titolo
+        scr_printf("NEUTRINO MULTI-LAUNCHER v1.1\n");
+        scr_printf("============================\n\n");
+        
+        scr_setfontcolor(0xFFFFFF);
+        scr_printf("DISPOSITIVO: %s\n", deviceNames[currentDevice]);
+        scr_printf("(L1/R1 cambia - X seleziona)\n\n");
 
         if (gameCount == 0) {
-            scr_printf("   < NESSUN GIOCO TROVATO >\n");
-            scr_printf("   Assicurati che i giochi siano in /DVD/\n");
+            scr_printf("   NESSUN GIOCO IN %s/DVD/\n", devicePrefix[currentDevice]);
         } else {
             for(int i=0; i<gameCount; i++) {
                 if (i == selectedIndex) {
-                    scr_setfontcolor(0x00FF00); // Verde (Corretto senza _)
-                    scr_printf(" > %s\n", gameList[i]);
+                    scr_setfontcolor(0x00FF00); // Verde selezione
+                    scr_printf(" -> %s\n", gameList[i]);
                 } else {
-                    scr_setfontcolor(0xAAAAAA); // Grigio (Corretto senza _)
-                    scr_printf("   %s\n", gameList[i]);
+                    scr_setfontcolor(0xAAAAAA); // Grigio
+                    scr_printf("    %s\n", gameList[i]);
                 }
             }
         }
@@ -145,15 +145,8 @@ int main() {
             if ((new_pad & PAD_CROSS) && !(old_pad & PAD_CROSS)) {
                 if (gameCount > 0) launch_neutrino(gameList[selectedIndex]);
             }
-            if ((new_pad & PAD_TRIANGLE) && !(old_pad & PAD_TRIANGLE)) {
-                scan_games();
-            }
             old_pad = new_pad;
         }
-
-        // Delay anti-flicker
-        for(int i=0; i<300000; i++) asm("nop"); 
     }
-
     return 0;
 }
