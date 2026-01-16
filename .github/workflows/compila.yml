@@ -1,11 +1,6 @@
-name: Build and Release PS2 ELF
+name: DraxTube Build System
 
-on: 
-  push:
-    branches: [ main ]
-    tags: [ 'v*' ]
-  pull_request:
-    branches: [ main ]
+on: [push]
 
 jobs:
   build:
@@ -17,23 +12,14 @@ jobs:
       - name: Install dependencies
         run: |
           apk add build-base git
+          # Installa le librerie grafiche mancanti
+          ps2sdk-ports-install gskit libjpeg-turbo libpng zlib
 
       - name: Compile
-        run: |
-          make
+        run: make
           
-      - name: Upload Artifact
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: NeutrinoLauncher-DraxTube
+          name: DraxTubeLauncher
           path: NeutrinoLauncher.elf
-
-      - name: Create Release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v1
-        with:
-          files: NeutrinoLauncher.elf
-          name: Release ${{ github.ref_name }}
-          body: "Compilazione automatica del Launcher Neutrino per DraxTube."
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
