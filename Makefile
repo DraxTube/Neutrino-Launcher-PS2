@@ -1,6 +1,7 @@
 EE_BIN = NeutrinoLauncher.elf
 EE_OBJS = main.o
-EE_LIBS = -ldebug -lpad -lpatches
+# Aggiungi -lfileXio qui sotto
+EE_LIBS = -ldebug -lpad -lfileXio -lpatches
 
 all: $(EE_BIN)
 
